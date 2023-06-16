@@ -13,5 +13,5 @@
 
 ### Usage
 
-* 查看[`SignalRTests.kt`](https://github.com/xiazunyang/signlar-lite/blob/master/library/src/test/kotlin/cn/numeron/signalr/SignalRTests.kt)
-* see [`SignalRTests.kt`](https://github.com/xiazunyang/signlar-lite/blob/master/library/src/test/kotlin/cn/numeron/signalr/SignalRTests.kt)
+* 查看[`SignalRTests.kt`](https://github.com/xiazunyang/signalr-lite/blob/master/library/src/test/kotlin/cn/numeron/signalr/SignalRTests.kt)
+* see [`SignalRTests.kt`](https://github.com/xiazunyang/signalr-lite/blob/master/library/src/test/kotlin/cn/numeron/signalr/SignalRTests.kt)
