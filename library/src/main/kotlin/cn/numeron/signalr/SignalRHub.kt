@@ -23,33 +23,35 @@ import kotlin.coroutines.resumeWithException
 
 class SignalRHub private constructor(
 
-        /** 连接地址 */
-        private val url: String,
+    /** 连接地址 */
+    private val url: String,
 
-        /** Gson */
-        private val gson: Gson,
+    /** Gson */
+    private val gson: Gson,
 
-        /** 调用方法的线程 */
-        private val executor: Executor?,
+    /** 调用方法的线程 */
+    private val executor: Executor?,
 
-        /** 日志记录器 */
-        private val logger: SignalRLogger?,
+    /** 日志记录器 */
+    private val logger: SignalRLogger?,
 
-        /** 授权地址 */
-        private val authorization: String?,
+    /** 授权地址 */
+    private val authorization: String?,
 
-        /** ping信号的间隔，单位为毫秒 */
-        private val pingIntervalMillis: Long,
+    /** ping信号的间隔，单位为毫秒 */
+    private val pingIntervalMillis: Long,
 
-        /** OkHttpClient */
-        private val okHttpClient: OkHttpClient,
+    /** OkHttpClient */
+    private val okHttpClient: OkHttpClient,
 
-        /** 拥有调用方法的对象 */
-        private val invocationOwners: List<Any>
+    /** 拥有调用方法的对象 */
+    private val invocationOwners: List<Any>
 
 ) {
 
     private val timer = Timer()
+
+    private var webSocket: WebSocket? = null
 
     /** invocationId与返回值类型的绑定关系 */
     private val returnTypes = mutableMapOf<String, Class<*>>()
@@ -73,9 +75,20 @@ class SignalRHub private constructor(
         }
     })
 
-    private var webSocket: WebSocket? = null
+    init {
+        invocationOwners.asSequence()
+            .map(Any::javaClass)
+            .map(Class<Any>::getMethods)
+            .flatMap(Array<Method>::toList)
+            .filter(::isSignalRInvocationMethod)
+            .forEach {
+                val target = getTarget(it)
+                val argumentTypes = it.parameterTypes.toList()
+                this.argumentTypes[target] = argumentTypes
+            }
+    }
 
-    fun eventFlow() = callbackFlow {
+    val eventFlow = callbackFlow {
 
         val webSocketListener = object : WebSocketListener() {
 
@@ -126,14 +139,14 @@ class SignalRHub private constructor(
         // 创建negotiate连接
         val negotiateHttpUrl = url.toHttpUrl().newBuilder().addEncodedPathSegment("negotiate").build()
         val negotiateRequest = Request.Builder()
-                .url(negotiateHttpUrl)
-                .post(byteArrayOf().toRequestBody())
-                .apply {
-                    if (!authorization.isNullOrEmpty()) {
-                        addHeader("Authorization", "Bearer $authorization")
-                    }
+            .url(negotiateHttpUrl)
+            .post(byteArrayOf().toRequestBody())
+            .apply {
+                if (!authorization.isNullOrEmpty()) {
+                    addHeader("Authorization", "Bearer $authorization")
                 }
-                .build()
+            }
+            .build()
         val negotiateCall = okHttpClient.newCall(negotiateRequest)
         val negotiateResponse = negotiateCall.await()
         val negotiateJson = negotiateResponse.body!!.string()
@@ -142,13 +155,13 @@ class SignalRHub private constructor(
         // 创建WebSocket连接
         val signalrHttpUrl = url.toHttpUrl().newBuilder().addQueryParameter("id", connectionId).build()
         val request = Request.Builder()
-                .url(signalrHttpUrl)
-                .apply {
-                    if (!authorization.isNullOrEmpty()) {
-                        addHeader("Authorization", "Bearer $authorization")
-                    }
+            .url(signalrHttpUrl)
+            .apply {
+                if (!authorization.isNullOrEmpty()) {
+                    addHeader("Authorization", "Bearer $authorization")
                 }
-                .build()
+            }
+            .build()
         return okHttpClient.newWebSocket(request, listener)
     }
 
@@ -168,26 +181,26 @@ class SignalRHub private constructor(
         }
         // 转换为事件
         return payloadStr.split(END_MARKER)
-                .asSequence()
-                .filter(String::isNotEmpty)
-                .map(::StringReader)
-                .map(::JsonReader)
-                .mapNotNull(signalREventDeserializer::read)
-                .toList()
+            .asSequence()
+            .filter(String::isNotEmpty)
+            .map(::StringReader)
+            .map(::JsonReader)
+            .mapNotNull(signalREventDeserializer::read)
+            .toList()
     }
 
     private fun findInvocation(target: String): Pair<Any, Method> {
         return invocations.getOrPut(target) {
             for (invocationOwner in invocationOwners) {
                 val method = invocationOwner.javaClass.methods
-                        .filter(::isSignalRInvocationMethod)
-                        .find {
-                            var name = it.getAnnotation(SignalRInvocation::class.java).alias
-                            if (name.isEmpty()) {
-                                name = it.name
-                            }
-                            name.equals(target, true)
+                    .filter(::isSignalRInvocationMethod)
+                    .find {
+                        var name = it.getAnnotation(SignalRInvocation::class.java).alias
+                        if (name.isEmpty()) {
+                            name = it.name
                         }
+                        name.equals(target, true)
+                    }
                 if (method != null) {
                     val pair = invocationOwner to method
                     invocations[target] = pair
@@ -203,10 +216,12 @@ class SignalRHub private constructor(
             is SignalREvent.CancelInvocation -> {
 
             }
+
             is SignalREvent.Close -> {
                 // 服务器要求客户端关闭连接
                 webSocket.close(1000, null)
             }
+
             is SignalREvent.Completion -> {
                 val invocationId = event.invocationId
                 val callback = callbacks[invocationId]
@@ -218,6 +233,7 @@ class SignalRHub private constructor(
                     }
                 }
             }
+
             is SignalREvent.Invocation -> {
                 // 执行调用
                 val (owner, method) = findInvocation(event.target)
@@ -228,22 +244,28 @@ class SignalRHub private constructor(
                     executor.execute(invocationTask)
                 }
             }
+
             is SignalREvent.InvocationBindingFailure -> {
 
             }
+
             SignalREvent.Open -> {
 
             }
+
             SignalREvent.Ping -> {
                 // 回ping消息
                 timer.schedule(PingTask(), pingIntervalMillis)
             }
+
             is SignalREvent.StreamBindingFailure -> {
 
             }
+
             is SignalREvent.StreamInvocation -> {
 
             }
+
             is SignalREvent.StreamItem -> {
 
             }
@@ -257,14 +279,15 @@ class SignalRHub private constructor(
         webSocket?.send(cmd + END_MARKER)
     }
 
+    inline fun <reified T> connect(): T = connect(T::class.java)
+
     @Suppress("UNCHECKED_CAST")
     fun <T> connect(serviceClass: Class<T>): T {
-        return Proxy.newProxyInstance(serviceClass.classLoader, arrayOf(serviceClass)) { _, method: Method, args: Array<out Any> ->
-            val signalRInvocation = method.getAnnotation(SignalRInvocation::class.java)
-            var target = signalRInvocation.alias
-            if (target.isEmpty()) {
-                target = method.name
-            }
+        return Proxy.newProxyInstance(
+            serviceClass.classLoader,
+            arrayOf(serviceClass)
+        ) { _, method: Method, args: Array<out Any> ->
+            val target = getTarget(method)
             // 创建[CompletableFuture]对象，用于获取在当前线程等待回调结果
             val completableFuture = CompletableFuture<Any?>()
 
@@ -295,9 +318,9 @@ class SignalRHub private constructor(
     }
 
     private inner class InvocationTask(
-            private val owner: Any,
-            private val method: Method,
-            private val invocation: SignalREvent.Invocation,
+        private val owner: Any,
+        private val method: Method,
+        private val invocation: SignalREvent.Invocation,
     ) : Runnable {
 
         override fun run() {
@@ -362,14 +385,14 @@ class SignalRHub private constructor(
         }
 
         fun build() = SignalRHub(
-                url = url,
-                logger = logger,
-                executor = executor,
-                gson = gson ?: Gson(),
-                authorization = authorization,
-                pingIntervalMillis = pingIntervalMillis,
-                invocationOwners = invocationOwners.toList(),
-                okHttpClient = okHttpClient ?: OkHttpClient()
+            url = url,
+            logger = logger,
+            executor = executor,
+            gson = gson ?: Gson(),
+            authorization = authorization,
+            pingIntervalMillis = pingIntervalMillis,
+            invocationOwners = invocationOwners.toList(),
+            okHttpClient = okHttpClient ?: OkHttpClient()
         )
 
     }
@@ -396,6 +419,14 @@ class SignalRHub private constructor(
 
         private fun isSignalRInvocationMethod(method: Method): Boolean {
             return method.getAnnotation(SignalRInvocation::class.java) != null
+        }
+
+        private fun getTarget(method: Method): String {
+            var target = method.getAnnotation(SignalRInvocation::class.java).alias
+            if (target.isEmpty()) {
+                target = method.name
+            }
+            return target
         }
     }
 

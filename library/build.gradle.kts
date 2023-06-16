@@ -2,8 +2,8 @@ plugins {
     kotlin("jvm") version "1.8.20"
 }
 
-group = 'cn.numeron'
-version = '1.0'
+group = "cn.numeron"
+version = "1.0.0-alpha"
 
 java {
     sourceCompatibility = JavaVersion.VERSION_1_8
@@ -11,9 +11,9 @@ java {
 }
 
 dependencies {
-
     api("com.google.code.gson:gson:2.8.5")
     api("com.squareup.okhttp3:okhttp:4.2.2")
+    api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.1")
 
     testImplementation("cn.numeron:http:1.0.7")
 
