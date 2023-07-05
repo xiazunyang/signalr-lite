@@ -1,12 +1,13 @@
 package cn.numeron.signalr
 
-class SignalRInvocationException @JvmOverloads constructor(
+class SignalRClosedException @JvmOverloads constructor(
     override val message: String?,
+    val allowReconnect: Boolean,
     override val cause: Throwable? = null
 ) : RuntimeException(message, cause) {
 
     companion object {
-        private const val serialVersionUID: Long = -4583689249203809821L
+        private const val serialVersionUID: Long = -4583689249203809822L
     }
 
 }
