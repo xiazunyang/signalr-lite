@@ -1,6 +1,6 @@
 plugins {
     kotlin("jvm") version "1.8.0"
-    id("com.vanniktech.maven.publish")
+    id("maven-publish")
 }
 
 group = "cn.numeron"
@@ -20,6 +20,14 @@ dependencies {
     testImplementation("cn.numeron:http:1.0.7")
 }
 
-mavenPublishing {
-    publishToMavenCentral(com.vanniktech.maven.publish.SonatypeHost.S01)
+publishing {
+    publications {
+        register<MavenPublication>("jitpack") {
+            groupId = "cn.numeron"
+            artifactId = "signalr-lite"
+            artifact(tasks.getByName("kotlinSourcesJar"))
+            version = project.version.toString()
+            from(components["java"])
+        }
+    }
 }
