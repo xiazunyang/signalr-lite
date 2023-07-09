@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.*
 import okhttp3.*
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.IOException
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
 import java.util.*
@@ -52,7 +53,8 @@ class SignalRHub private constructor(
 
     val messageChannel = Channel<SignalREvent>()
 
-    val eventFlow = connectSignalR(url)
+    val eventFlow = flowOf(url)
+        .flatMapLatest(::connect)
         .mapNotNull(::toSignalREvent)
         .onEach(::handleSignalREvent)
 
@@ -69,7 +71,7 @@ class SignalRHub private constructor(
         }
     }
 
-    private fun connectSignalR(url: String): Flow<WebSocketEvent> {
+    private suspend fun connect(url: String): Flow<WebSocketEvent> {
         // 创建negotiate连接
         val negotiateHttpUrl = url.toHttpUrl().newBuilder().addEncodedPathSegment("negotiate").build()
         val negotiateRequest = Request.Builder()
@@ -81,10 +83,13 @@ class SignalRHub private constructor(
                 }
             }
             .build()
-        val negotiateCall = okHttpClient.newCall(negotiateRequest)
-        val negotiateResponse = negotiateCall.execute()
-        val negotiateJson = negotiateResponse.body!!.string()
-        val negotiatePayload = gson.fromJson(negotiateJson, NegotiatePayload::class.java)
+        val negotiateJson = withContext(Dispatchers.IO) {
+            val response = okHttpClient.newCall(negotiateRequest).await()
+            response.body!!.string()
+        }
+        val negotiatePayload = withContext(Dispatchers.Default) {
+            gson.fromJson(negotiateJson, NegotiatePayload::class.java)
+        }
         val connectionId = negotiatePayload.connectionId
         // 创建WebSocket连接
         val signalrHttpUrl = url.toHttpUrl().newBuilder().addQueryParameter("id", connectionId).build()
@@ -170,6 +175,9 @@ class SignalRHub private constructor(
         return gson.toJson(signalREvent) + END_MARKER
     }
 
+    /** connect to SignalR server */
+    suspend fun connect(): Unit = eventFlow.collect()
+
     fun invoke(target: String, vararg arguments: Any?) {
         messageChannel.trySendBlocking(
             SignalREvent.Invocation(target = target, arguments = arguments)
@@ -242,7 +250,7 @@ class SignalRHub private constructor(
         private var authorization: String? = null
         private var okHttpClient: OkHttpClient? = null
         private val invocationOwners = mutableSetOf<Any>()
-        private var coroutineDispatcher: CoroutineDispatcher = Dispatchers.Default
+        private var invocationDispatcher: CoroutineDispatcher = Dispatchers.Main
 
         /** Gson */
         fun gson(gson: Gson) = apply {
@@ -265,8 +273,8 @@ class SignalRHub private constructor(
         }
 
         /** 设置线程池 */
-        fun executor(dispatcher: CoroutineDispatcher) = apply {
-            this.coroutineDispatcher = dispatcher
+        fun invocationDispatcher(dispatcher: CoroutineDispatcher) = apply {
+            this.invocationDispatcher = dispatcher
         }
 
         /** 设置执行远程调用的线程 */
@@ -279,7 +287,7 @@ class SignalRHub private constructor(
             logger = logger,
             gson = gson ?: Gson(),
             authorization = authorization,
-            invocationDispatcher = coroutineDispatcher,
+            invocationDispatcher = invocationDispatcher,
             invocationOwners = invocationOwners.toList(),
             okHttpClient = okHttpClient ?: OkHttpClient()
         )
@@ -294,14 +302,31 @@ class SignalRHub private constructor(
             return method.getAnnotation(SignalRInvocation::class.java) != null
         }
 
-        @JvmStatic
-        fun getTarget(method: Method): String {
+        private fun getTarget(method: Method): String {
             var target = method.getAnnotation(SignalRInvocation::class.java).alias
             if (target.isEmpty()) {
                 target = method.name
             }
             return target
         }
+
+        private suspend fun Call.await(): Response {
+            return suspendCancellableCoroutine { continuation ->
+                continuation.invokeOnCancellation {
+                    cancel()
+                }
+                enqueue(object : Callback {
+                    override fun onFailure(call: Call, e: IOException) {
+                        continuation.resumeWithException(e)
+                    }
+
+                    override fun onResponse(call: Call, response: Response) {
+                        continuation.resume(response)
+                    }
+                })
+            }
+        }
+
     }
 
 }

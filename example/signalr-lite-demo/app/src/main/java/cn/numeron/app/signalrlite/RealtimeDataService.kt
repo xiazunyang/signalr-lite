@@ -1,4 +1,6 @@
-package cn.numeron.signalr
+package cn.numeron.app.signalrlite
+
+import cn.numeron.signalr.SignalRInvocation
 
 interface RealtimeDataService {
 

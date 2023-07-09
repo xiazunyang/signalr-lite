@@ -1,6 +1,6 @@
 package cn.numeron.signalr
 
-interface SignalRLogger {
+fun interface SignalRLogger {
 
     fun log(message: String)
 

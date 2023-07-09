@@ -39,7 +39,7 @@ fun OkHttpClient.newWebSocketAsFlow(
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                throw t
+                close(t)
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
